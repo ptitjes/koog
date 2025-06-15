@@ -8,13 +8,18 @@ import ai.koog.agents.core.agent.entity.AIAgentStateManager
 import ai.koog.agents.core.agent.entity.AIAgentStorage
 import ai.koog.agents.core.agent.entity.AIAgentStrategy
 import ai.koog.agents.core.dsl.builder.strategy
-import ai.koog.agents.core.dsl.extension.nodeDoNothing
-import ai.koog.agents.core.dsl.extension.nodeExecuteTool
-import ai.koog.agents.core.dsl.extension.nodeLLMRequest
-import ai.koog.agents.core.dsl.extension.nodeLLMSendToolResult
 import ai.koog.agents.core.dsl2.builder.forwardTo
-import ai.koog.agents.core.dsl2.extension.onAssistantMessage
-import ai.koog.agents.core.dsl2.extension.onToolCall
+import ai.koog.agents.core.dsl2.extension.addToPrompt
+import ai.koog.agents.core.dsl2.extension.dumpToPrompt
+import ai.koog.agents.core.dsl2.extension.executeToolCalls
+import ai.koog.agents.core.dsl2.extension.onAssistantMessages
+import ai.koog.agents.core.dsl2.extension.onSingleAssistantMessage
+import ai.koog.agents.core.dsl2.extension.onToolCalls
+import ai.koog.agents.core.dsl2.extension.onToolResults
+import ai.koog.agents.core.dsl2.extension.requestLLM
+import ai.koog.agents.core.dsl2.extension.unwrapResponse
+import ai.koog.agents.core.dsl2.extension.wrapToolResults
+import ai.koog.agents.core.dsl2.extension.wrapUserRequest
 import ai.koog.agents.core.environment.AIAgentEnvironment
 import ai.koog.agents.core.environment.AIAgentEnvironmentUtils.mapToToolResult
 import ai.koog.agents.core.environment.ReceivedToolResult
@@ -455,17 +460,29 @@ public open class AIAgent(
  * 5. Repeat until LLM indicates no further tool calls are needed or the agent finishes.
  */
 public fun singleRunStrategy(): AIAgentStrategy = strategy("single_run") {
-    val nodeCallLLM by nodeLLMRequest("sendInput")
-    val nodeProcessLLMResponse by nodeDoNothing<Message.Response>("processLLMResponse")
-    val nodeExecuteTool by nodeExecuteTool("nodeExecuteTool")
-    val nodeSendToolResult by nodeLLMSendToolResult("nodeSendToolResult")
+    val wrapUserRequest by wrapUserRequest()
 
-    nodeStart forwardTo nodeCallLLM
-    nodeCallLLM forwardTo nodeProcessLLMResponse
+    val singleRunGraph by subgraph<List<Message.Request>, List<Message.Response>> {
+        val dumpUserRequest by dumpToPrompt()
+        val requestLLM by requestLLM()
+        val addLLMResponses by addToPrompt()
+        val executeToolCalls by executeToolCalls()
+        val wrapToolResults by wrapToolResults()
+        val dumpToolResults by dumpToPrompt()
 
-    nodeProcessLLMResponse onToolCall { true } forwardTo nodeExecuteTool
-    nodeProcessLLMResponse onAssistantMessage { true } forwardTo nodeFinish
+        nodeStart forwardTo dumpUserRequest
+        dumpUserRequest forwardTo requestLLM
 
-    nodeExecuteTool forwardTo nodeSendToolResult
-    nodeSendToolResult forwardTo nodeProcessLLMResponse
+        requestLLM forwardTo addLLMResponses
+        addLLMResponses onToolCalls { true } forwardTo executeToolCalls
+        addLLMResponses onAssistantMessages { true } forwardTo nodeFinish
+
+        executeToolCalls onToolResults { true } forwardTo wrapToolResults
+        wrapToolResults forwardTo dumpToolResults
+        dumpToolResults forwardTo requestLLM
+    }
+
+    nodeStart forwardTo wrapUserRequest
+    wrapUserRequest forwardTo singleRunGraph
+    singleRunGraph onSingleAssistantMessage { true } unwrapResponse { it.content } forwardTo nodeFinish
 }

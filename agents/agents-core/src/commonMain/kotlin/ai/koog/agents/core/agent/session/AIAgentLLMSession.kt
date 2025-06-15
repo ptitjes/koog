@@ -114,6 +114,21 @@ public sealed class AIAgentLLMSession(
     protected suspend fun executeSingle(prompt: Prompt, tools: List<ToolDescriptor>): Message.Response =
         executeMultiple(prompt, tools).first()
 
+    public open suspend fun requestLLM(
+        toolChoice: LLMParams.ToolChoice = LLMParams.ToolChoice.Auto,
+    ): List<Message.Response> {
+        validateSession()
+
+        val promptWithToolChoice = prompt.withUpdatedParams { this.toolChoice = toolChoice }
+
+        /*
+            Not all LLM providers support a tool list when tool choice is set to "none",
+            so we are rewriting all tool messages to regular messages, for all requests without tools.
+         */
+        val toolsToUse = if (toolChoice != LLMParams.ToolChoice.None) tools else emptyList()
+
+        return executeMultiple(promptWithToolChoice, toolsToUse)
+    }
 
     /**
      * Sends a request to the language model without utilizing any tools and returns the response.

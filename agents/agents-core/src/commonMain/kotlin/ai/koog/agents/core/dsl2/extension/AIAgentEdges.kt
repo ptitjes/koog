@@ -75,25 +75,26 @@ public inline infix fun <SourceOutput, reified TResult : ToolResult>
  *
  * @param block A function that evaluates whether to accept a tool call message
  */
-public infix fun <SourceOutput, TargetInput>
-        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onToolCall(
+public infix fun <SourceOutput, TargetInput : List<Message>>
+        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onSingleToolCall(
     block: suspend (Message.Tool.Call) -> Boolean,
 ): AIAgentEdgeBuilder<SourceOutput, Message.Tool.Call> =
-    onIsInstance(Message.Tool.Call::class).onCondition { toolCall -> block(toolCall) }
+    onCondition { it.size == 1 && it[0] is Message.Tool.Call }
+        .transformed { it[0] as Message.Tool.Call }
+        .onCondition { toolCall -> block(toolCall) }
 
 /**
  * Creates an edge that filters tool call messages for a specific tool and arguments condition.
  *
  * @param tool The tool to match against
- * @param block A function that evaluates the tool arguments to determine if the edge should accept the message
+ * @param block An optional function that evaluates the tool arguments to determine if the edge should accept the message
  */
-public inline fun <SourceOutput, TargetInput, reified Args : ToolArgs>
-        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onToolCall(
+public inline fun <SourceOutput, TargetInput : List<Message>, reified Args : ToolArgs>
+        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onSingleToolCall(
     tool: Tool<Args, *>,
-    crossinline block: suspend (Args) -> Boolean,
+    crossinline block: suspend (Args) -> Boolean = { true },
 ): AIAgentEdgeBuilder<SourceOutput, Message.Tool.Call> {
-    return onIsInstance(Message.Tool.Call::class)
-        .onCondition { it.tool == tool.name }
+    return onSingleToolCall { it.tool == tool.name }
         .onCondition { toolCall ->
             val args = tool.decodeArgs(toolCall.contentJson)
             block(args)
@@ -101,28 +102,15 @@ public inline fun <SourceOutput, TargetInput, reified Args : ToolArgs>
 }
 
 /**
- * Creates an edge that filters tool call messages for a specific tool.
- *
- * @param tool The tool to match against
- */
-public infix fun <SourceOutput, TargetInput>
-        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onToolCall(
-    tool: Tool<*, *>,
-): AIAgentEdgeBuilder<SourceOutput, Message.Tool.Call> {
-    return onIsInstance(Message.Tool.Call::class).onCondition { it.tool == tool.name }
-}
-
-/**
  * Creates an edge that filters tool call messages to NOT be a specific tool
  *
  * @param tool The tool to match against
  */
-public infix fun <SourceOutput, TargetInput>
+public infix fun <SourceOutput, TargetInput : List<Message>>
         AIAgentEdgeBuilder<SourceOutput, TargetInput>.onToolNotCalled(
     tool: Tool<*, *>,
-): AIAgentEdgeBuilder<SourceOutput, Message.Tool.Call> {
-    return onIsInstance(Message.Tool.Call::class).onCondition { it.tool != tool.name }
-}
+): AIAgentEdgeBuilder<SourceOutput, TargetInput> =
+    onCondition { it.size != 1 || it[0] !is Message.Tool.Call || (it[0] as Message.Tool.Call).tool != tool.name }
 
 /**
  * Creates an edge that filters tool result messages for a specific tool and result condition.
@@ -146,16 +134,12 @@ public inline fun <SourceOutput, TargetInput, reified Result : ToolResult>
  *
  * @param block A function that evaluates whether to accept a list of tool call messages
  */
-public infix fun <SourceOutput, TargetInput>
-        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onMultipleToolCalls(
+public infix fun <SourceOutput, TargetInput : List<Message>>
+        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onToolCalls(
     block: suspend (List<Message.Tool.Call>) -> Boolean,
-): AIAgentEdgeBuilder<SourceOutput, List<Message.Tool.Call>> {
-    return onIsInstance(List::class)
-        .transformed { it to it.filterIsInstance<Message.Tool.Call>() }
-        .onCondition { (original, filtered) -> original == filtered }
-        .transformed { (_, filtered) -> filtered }
-        .onCondition { toolCalls -> block(toolCalls) }
-}
+): AIAgentEdgeBuilder<SourceOutput, List<Message.Tool.Call>> =
+    transformed { it.filterIsInstance<Message.Tool.Call>() }
+        .onCondition { toolCalls -> toolCalls.isNotEmpty() && block(toolCalls) }
 
 /**
  * Creates an edge that filters lists of tool result messages based on a custom condition.
@@ -163,30 +147,42 @@ public infix fun <SourceOutput, TargetInput>
  * @param block A function that evaluates whether to accept a list of tool result messages
  */
 @Suppress("unused")
-public infix fun <SourceOutput, TargetInput>
-        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onMultipleToolResults(
+public infix fun <SourceOutput, TargetInput : List<ReceivedToolResult>>
+        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onToolResults(
     block: suspend (List<ReceivedToolResult>) -> Boolean,
-): AIAgentEdgeBuilder<SourceOutput, List<ReceivedToolResult>> {
-    return onIsInstance(List::class)
-        .transformed { it to it.filterIsInstance<ReceivedToolResult>() }
-        .onCondition { (original, filtered) -> original == filtered }
-        .transformed { (_, filtered) -> filtered }
-        .onCondition { toolResults -> block(toolResults) }
-}
+): AIAgentEdgeBuilder<SourceOutput, List<ReceivedToolResult>> =
+    transformed { it.filterIsInstance<ReceivedToolResult>() }
+        .onCondition { toolResults -> toolResults.isNotEmpty() && block(toolResults) }
 
 /**
  * Creates an edge that filters assistant messages based on a custom condition and extracts their content.
  *
  * @param block A function that evaluates whether to accept an assistant message
  */
-public infix fun <SourceOutput, TargetInput>
-        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onAssistantMessage(
+public infix fun <SourceOutput, TargetInput : List<Message>>
+        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onAssistantMessages(
+    block: suspend (List<Message.Assistant>) -> Boolean,
+): AIAgentEdgeBuilder<SourceOutput, List<Message.Assistant>> =
+    transformed { it.filterIsInstance<Message.Assistant>() }
+        .onCondition { toolResults -> block(toolResults) }
+
+/**
+ * Creates an edge that filters assistant messages based on a custom condition and extracts their content.
+ *
+ * @param block A function that evaluates whether to accept an assistant message
+ */
+public infix fun <SourceOutput, TargetInput : List<Message>>
+        AIAgentEdgeBuilder<SourceOutput, TargetInput>.onSingleAssistantMessage(
     block: suspend (Message.Assistant) -> Boolean,
-): AIAgentEdgeBuilder<SourceOutput, String> {
-    return onIsInstance(Message.Assistant::class)
-        .onCondition { signature -> block(signature) }
-        .transformed { it.content }
-}
+): AIAgentEdgeBuilder<SourceOutput, Message.Assistant> =
+    onCondition { it.size == 1 && it[0] is Message.Assistant }
+        .transformed { it[0] as Message.Assistant }
+        .onCondition { message -> block(message) }
+
+public infix fun <SourceOutput, T>
+        AIAgentEdgeBuilder<SourceOutput, Message.Assistant>.unwrapResponse(
+    block: suspend (Message.Assistant) -> T,
+): AIAgentEdgeBuilder<SourceOutput, T> = transformed { block(it) }
 
 /**
  * Creates an edge that filters assistant messages based on a custom condition and provides access to media content.

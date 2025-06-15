@@ -24,9 +24,10 @@ public abstract class AIAgentEdgeBuilder<SourceOutput, TargetInput> internal con
     internal abstract val sourceNode: AIAgentNodeBase<*, SourceOutput>
 }
 
-public infix fun <SourceInput, SourceOutput, TargetOutput> AIAgentEdgeBuilder<SourceInput, SourceOutput>.forwardTo(
-    target: AIAgentNodeBase<SourceOutput, TargetOutput>,
-): AIAgentNodeBase<SourceOutput, TargetOutput> {
+public infix fun <SourceOutput, MaybeInput : TargetInput, TargetInput, TargetOutput>
+        AIAgentEdgeBuilder<SourceOutput, MaybeInput>.forwardTo(
+    target: AIAgentNodeBase<TargetInput, TargetOutput>,
+): AIAgentNodeBase<TargetInput, TargetOutput> {
     sourceNode.addEdge(AIAgentEdge(target, forwardOutput))
     return target
 }
