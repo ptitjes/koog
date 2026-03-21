@@ -183,6 +183,70 @@ class MistralAILLMClientTest {
         }
     """.trimIndent()
 
+    //language=json
+    val toolResultSendWithReferenceBody = """
+        {
+          "id": "a3b8fde68be9494b93d43fb880d9fb5c",
+          "created": 1774091482,
+          "model": "mistral-medium-latest",
+          "usage": {
+            "prompt_tokens": 1048,
+            "total_tokens": 1361,
+            "completion_tokens": 313,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "object": "chat.completion",
+          "choices": [
+            {
+              "index": 0,
+              "finish_reason": "stop",
+              "message": {
+                "role": "assistant",
+                "tool_calls": null,
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Here are some recent movie recommendations based on the latest sources:\n\n1. **Popular Movies Right Now (Theaters & Streaming):**\n   - Check out Rotten Tomatoes' list of the 30 most popular movies currently available, including both theatrical releases and streaming options. This list is updated regularly and reflects what audiences are watching and buzzing about right now. You can find the full list and details [here](https://editorial.rottentomatoes.com/guide/popular-movies/)"
+                  },
+                  {
+                    "type": "reference",
+                    "reference_ids": [
+                      1
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": ".\n\n2. **Best New Movies to Stream:**\n   - Digital Trends highlights several new movies to stream across platforms like Netflix, Hulu, Prime Video, and HBO Max. Some recent picks include \"One Battle After Another,\" \"Wicked: For Good,\" \"Fackham Hall,\" \"Frankenstein,\" \"Sinners,\" and \"Superman.\" For more information, visit [Digital Trends](https://www.digitaltrends.com/movies/best-new-movies-to-stream-this-week/)"
+                  },
+                  {
+                    "type": "reference",
+                    "reference_ids": [
+                      3
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": ".\n\n3. **Best Movies Now Playing in Theaters:**\n   - The Film Stage offers a weekly updated feature on the best movies currently playing in theaters, from new releases to special restorations. This is a great resource if you prefer the big-screen experience. See their recommendations [here](https://thefilmstage.com/the-best-movies-now-playing-in-theaters/)"
+                  },
+                  {
+                    "type": "reference",
+                    "reference_ids": [
+                      5
+                    ]
+                  },
+                  {
+                    "type": "text",
+                    "text": ".\n\nThese sources provide a mix of critical and audience-driven recommendations, so you can choose based on your preferred viewing platform and genre."
+                  }
+                ]
+              }
+            }
+          ]
+        }
+    """.trimIndent()
+
     @Test
     fun testExecute() = runTest {
         var capturedUrl = ""
@@ -386,5 +450,36 @@ class MistralAILLMClientTest {
         assertEquals(35, response.metaInfo.inputTokensCount)
         assertEquals(191, response.metaInfo.outputTokensCount)
         assertEquals(226, response.metaInfo.totalTokensCount)
+    }
+
+    @Test
+    fun testToolResultSendResponseWithReferences() = runTest {
+        var capturedBody: String? = null
+        val engine = MockEngine.Companion { req ->
+            val content = req.body as TextContent
+            capturedBody = content.text
+
+            respond(
+                content = toolResultSendWithReferenceBody,
+                status = HttpStatusCode.OK,
+                headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString())
+            )
+        }
+        val http = HttpClient(engine) {}
+        val client = MistralAILLMClient(apiKey = key, baseClient = http, clock = FixedClock)
+        val prompt = Prompt.build(
+            id = "p-references",
+            clock = FixedClock,
+        ) {
+            user("Search for recent movie recommendations, and give me a list of movies with references.")
+        }
+
+        val responses = client.execute(prompt, MistralAIModels.Chat.MistralMedium31)
+        assertEquals(1, responses.size, "Response should have one choice")
+        assertNotNull(capturedBody, "Captured body should not be null")
+        assertTrue(
+            capturedBody.contains("{\"type\":\"reference\",\"reference_ids\":"),
+            "Response body should contain reference"
+        )
     }
 }
